@@ -2,26 +2,33 @@ var glob = require('glob');
 var path = require('path');
 
 module.exports = function (root, globs, opts) {
-    if (typeof globs === 'string') globs = [ globs ];
+    if (typeof globs === 'string' || (!Array.isArray(globs) && typeof globs === 'object')) globs = [ globs ];
     if (!Array.isArray(globs)) return {};
     if (!opts) opts = {};
     var requireFn = opts.require || require;
-    
-    var xglobs = globs.map(function (g) {
-        if (Array.isArray(g)) {
-            return [ path.resolve(root, g[0]) ].concat(g.slice(1));
-        }
-        return path.resolve(root, g)
-    });
-    
-    return walk(xglobs.reduce(function (acc, g) {
-        var args = [];
+
+    return walk(globs.reduce(function (acc, g) {
+        var args = [],
+            gOptions;
+
         if (Array.isArray(g)) {
             args = g.slice(1);
             g = g[0];
         }
-        var ex = glob.sync(g);
-        
+
+        if (typeof g === 'object' && g.pattern) {
+            gOptions = g;
+            g = g.pattern;
+            delete gOptions.pattern;
+
+            if (gOptions.ignore) {
+                gOptions.ignore = gOptions.ignore.map(function(pattern) {
+                    return path.resolve(root, pattern);
+                });
+            }
+        }
+        var ex = glob.sync(path.resolve(root, g), gOptions);
+
         ex.forEach(function (file) {
             var keys = keyOf(file);
             for (var node = acc, i = 0; i < keys.length; i++) {
@@ -38,7 +45,7 @@ module.exports = function (root, globs, opts) {
         });
         return acc;
     }, {}));
-    
+
     function walk (node) {
         if (Array.isArray(node)) {
             var exp = requireFn(node[0]);
@@ -51,7 +58,7 @@ module.exports = function (root, globs, opts) {
                     return f.apply(this, args_);
                 };
             };
-            
+
             if (typeof exp === 'function') {
                 return mapF(exp);
             }
@@ -69,14 +76,14 @@ module.exports = function (root, globs, opts) {
         else if (typeof node === 'object') {
             var init = node.index && typeof node.index[0] === 'string'
                 && requireFn(node.index[0]);
-            
+
             return Object.keys(node).reduce(function (acc, key) {
                 acc[key] = walk(node[key]);
                 return acc;
             }, init && typeof init === 'function' ? init : {});
         }
     }
-    
+
     function keyOf (file) {
         var parts = path.relative(root, file).split(/\/|\\/);
         var len = parts.length;
